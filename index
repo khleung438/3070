@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Test Page - GitHub Pages</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: linear-gradient(135deg, #6e8efb, #a777e2);
+      color: white;
+      text-align: center;
+      padding: 50px;
+      margin: 0;
+    }
+    h1 {
+      font-size: 3em;
+      margin-bottom: 20px;
+    }
+    p {
+      font-size: 1.2em;
+    }
+    .success {
+      background: rgba(0, 0, 0, 0.3);
+      padding: 20px;
+      border-radius: 10px;
+      display: inline-block;
+      margin-top: 30px;
+    }
+    .emoji {
+      font-size: 4em;
+      animation: bounce 2s infinite;
+    }
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-20px); }
+    }
+  </style>
+</head>
+<body>
+  <div class="emoji">🎉</div>
+  <h1>GitHub Pages is Working!</h1>
+  <p>Your repository is successfully hosting this page.</p>
+  <div class="success">
+    <strong>Repo:</strong> <span id="repo-name">your-username/your-repo</span><br>
+    <strong>URL:</strong> <a href="#" id="page-url" style="color: #fff;">Loading...</a>
+  </div>
+
+  <script>
+    // Auto-fill repo name and URL
+    const path = window.location.pathname;
+    const repo = path.split('/')[1] + '/' + path.split('/')[2].replace('.github.io', '');
+    document.getElementById('repo-name').textContent = repo || 'your-username/your-repo';
+    document.getElementById('page-url').textContent = window.location.href;
+    document.getElementById('page-url').href = window.location.href;
+  </script>
+</body>
+</html>
