@@ -61,7 +61,7 @@
 <body>
 
   <div class="emoji">Live Camera</div>
-  <h1>ESP32-CAM @ 192.168.0.132</h1>
+  <h1>ESP32-CAM @ 192.168.128.10</h1>
   <p>Live MJPEG stream from your ESP32-CAM</p>
 
   <div class="video-container">
@@ -75,7 +75,7 @@
   <p><strong>GitHub Pages URL:</strong> <a id="pageUrl" href="#" style="color:#fff;">Loading...</a></p>
 
   <script>
-    const ESP_IP = "192.168.0.132";
+    const ESP_IP = "192.168.128.10:81";
     const streamUrl = `http://${ESP_IP}/stream`;
 
     const video = document.getElementById('stream');
