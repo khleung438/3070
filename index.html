@@ -3,56 +3,107 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Test Page - GitHub Pages</title>
+  <title>ESP32-CAM Live Stream</title>
   <style>
     body {
       font-family: Arial, sans-serif;
       background: linear-gradient(135deg, #6e8efb, #a777e2);
       color: white;
       text-align: center;
-      padding: 50px;
+      padding: 20px;
       margin: 0;
     }
     h1 {
-      font-size: 3em;
-      margin-bottom: 20px;
+      font-size: 2.5em;
+      margin-bottom: 10px;
     }
-    p {
-      font-size: 1.2em;
-    }
-    .success {
-      background: rgba(0, 0, 0, 0.3);
+    .video-container {
+      margin: 30px auto;
       padding: 20px;
+      background: rgba(0, 0, 0, 0.5);
+      border-radius: 15px;
+      max-width: 800px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+    }
+    .video-frame {
+      width: 100%;
+      height: 480px;
+      border: 4px solid #fff;
       border-radius: 10px;
-      display: inline-block;
-      margin-top: 30px;
+      background: #000;
+      display: block;
     }
-    .emoji {
-      font-size: 4em;
-      animation: bounce 2s infinite;
+    .controls {
+      margin: 15px 0;
     }
-    @keyframes bounce {
-      0%, 100% { transform: translateY(0); }
-      50% { transform: translateY(-20px); }
+    .ip-display {
+      background: rgba(255,255,255,0.2);
+      padding: 10px;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 1.1em;
     }
+    .btn {
+      padding: 10px 20px;
+      background: #4CAF50;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 1em;
+      margin: 5px;
+    }
+    .btn:hover { background: #45a049; }
+    .emoji { font-size: 3em; animation: pulse 2s infinite; }
+    @keyframes pulse { 0%,100% { transform: scale(1); } 50% { transform: scale(1.1); } }
   </style>
 </head>
 <body>
-  <div class="emoji">🎉</div>
-  <h1>GitHub Pages is Working!</h1>
-  <p>Your repository is successfully hosting this page.</p>
-  <div class="success">
-    <strong>Repo:</strong> <span id="repo-name">your-username/your-repo</span><br>
-    <strong>URL:</strong> <a href="#" id="page-url" style="color: #fff;">Loading...</a>
+
+  <div class="emoji">Live Camera</div>
+  <h1>ESP32-CAM @ 192.168.0.132</h1>
+  <p>Live MJPEG stream from your ESP32-CAM</p>
+
+  <div class="video-container">
+    <img id="stream" class="video-frame" src="" alt="Loading stream...">
+    <div class="controls">
+      <div class="ip-display">IP: <span id="currentIp">192.168.0.132</span></div>
+      <button class="btn" onclick="reloadStream()">Refresh Stream</button>
+    </div>
   </div>
 
+  <p><strong>GitHub Pages URL:</strong> <a id="pageUrl" href="#" style="color:#fff;">Loading...</a></p>
+
   <script>
-    // Auto-fill repo name and URL
-    const path = window.location.pathname;
-    const repo = path.split('/')[1] + '/' + path.split('/')[2].replace('.github.io', '');
-    document.getElementById('repo-name').textContent = repo || 'your-username/your-repo';
-    document.getElementById('page-url').textContent = window.location.href;
-    document.getElementById('page-url').href = window.location.href;
+    const ESP_IP = "192.168.0.132";
+    const streamUrl = `http://${ESP_IP}/stream`;
+
+    const video = document.getElementById('stream');
+    const ipSpan = document.getElementById('currentIp');
+    const pageUrl = document.getElementById('pageUrl');
+
+    // Set page URL
+    pageUrl.textContent = window.location.href;
+    pageUrl.href = window.location.href;
+
+    // Load stream
+    function loadStream() {
+      video.src = streamUrl + '?t=' + new Date().getTime(); // Cache buster
+      ipSpan.textContent = ESP_IP;
+    }
+
+    // Reload stream
+    function reloadStream() {
+      video.src = ''; // Clear
+      setTimeout(loadStream, 500);
+    }
+
+    // Auto-load on start
+    window.onload = loadStream;
+
+    // Auto-reload every 30 seconds to prevent freeze
+    setInterval(reloadStream, 30000);
   </script>
+
 </body>
 </html>
