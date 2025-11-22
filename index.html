@@ -1,0 +1,832 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+    <link rel="manifest" href="./manifest.json">    
+    <link rel="icon" href="https://cdn-icons-png.flaticon.com/512/3069/3069174.png">
+    
+    <!-- Register service worker -->
+    <script>
+      if ('serviceWorker' in navigator) {
+        window.addEventListener('load', () => {
+          navigator.serviceWorker.register('sw.js');
+        });
+      }
+    </script>
+    
+    <title>Hamster Monitor – ThingSpeak Dashboard</title>
+    <style>
+        :root {
+            --bg1: #101322;
+            --bg2: #1a1f35;
+            --card: #20263f;
+            --accent: #6e8efb;
+            --accent2: #a777e2;
+            --text: #e8ecf8;
+            --muted: #b9c2df;
+            --highlight: #ffa64d;
+            --good: #58d68d;
+            --bad: #ff6b6b;
+            --offline: #7f8c8d;
+        }
+        
+        * { box-sizing: border-box; }
+        
+        body {
+            margin: 0;
+            padding: 24px;
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: var(--text);
+            background: radial-gradient(1200px 600px at 50% -10%, var(--bg2), var(--bg1));
+            background-attachment: fixed;
+            min-height: 100vh;
+            position: relative;
+        }
+
+        svg.icon {
+            width: 20px;
+            height: 20px;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            vertical-align: middle;
+            margin-right: 8px;
+            color: var(--accent);
+        }
+
+        #loginOverlay {
+            position: fixed;
+            inset: 0; background: rgba(10,13,29,0.98);
+            backdrop-filter: blur(10px); display: flex; align-items: center;
+            justify-content: center; z-index: 9999; flex-direction: column; gap: 24px;
+        }
+        #loginBox {
+            background: var(--card);
+            padding: 32px; border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,.6); text-align: center;
+            width: 90%; max-width: 400px;
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        #loginBox h2 { margin: 0 0 16px; color: var(--accent); }
+        input { 
+            width: 100%;
+            padding: 12px; margin: 8px 0; border-radius: 8px;
+            border: 1px solid rgba(255,255,255,.12); background: rgba(0,0,0,.2);
+            color: var(--text); font-size: 1rem; transition: border-color 0.2s;
+        }
+        input:focus { outline: none; border-color: var(--accent); }
+        
+        #loginBtn { margin-top: 16px; padding: 12px 20px; font-size: 1rem; cursor: pointer; width: 100%; }
+        #loginError { color: var(--bad); margin-top: 10px; min-height: 24px; font-size: 0.9rem; }
+
+        #mainContent { opacity: 0; transition: opacity 0.6s ease; pointer-events: none; }
+        body.logged-in #mainContent { opacity: 1; pointer-events: all; }
+        body.logged-in #loginOverlay { display: none; }
+
+        header {
+            display: flex;
+            align-items: center; justify-content: space-between;
+            gap: 16px; margin-bottom: 24px; flex-wrap: wrap;
+        }
+        .brand { display: flex; align-items: center; gap: 12px; }
+        .brand .dot {
+            width: 12px;
+            height: 12px; border-radius: 50%;
+            background: var(--good);
+            box-shadow: 0 0 12px var(--good); 
+            transition: background 0.3s, box-shadow 0.3s;
+        }
+        .brand .dot.offline { background: var(--bad); box-shadow: 0 0 8px var(--bad); }
+        .brand .dot.pulse { animation: pulse 2s infinite; }
+        
+        @keyframes pulse { 0%,100%{ transform: scale(1); opacity: 1;} 50%{ transform: scale(1.2); opacity: 0.8;} }
+        
+        h1 { font-size: 1.6rem; margin: 0; background: linear-gradient(to right, #fff, #b9c2df); -webkit-background-clip: text; -webkit-text-fill-color: transparent;}
+        .meta { font-size: .9rem; color: var(--muted); display: flex; align-items: center; gap: 6px; }
+
+        .cards { 
+            display: grid;
+            grid-template-columns: 1fr 1fr; 
+            gap: 20px; 
+            align-items: stretch;
+            max-width: 1200px;
+            margin: 0 auto 20px auto;
+        }
+
+        .card {
+            background: linear-gradient(180deg, rgba(255,255,255,.05), rgba(255,255,255,.02)), var(--card);
+            border: 1px solid rgba(255,255,255,.08); border-radius: 16px;
+            padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,.25);
+            position: relative; overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        .card::before {
+            content:'';
+            position: absolute; top:0; left:0; width:100%; height:4px;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            opacity: 0.7;
+        }
+
+        .card h2 {
+            margin: 0 0 16px;
+            font-size: 1.1rem; color: #ffffff;
+            display: flex; align-items: center;
+        }
+
+        .data-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px 24px; }
+        
+        .field-group { display: flex; flex-direction: column; }
+        .row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+        .label { color: var(--muted); font-size: .85rem; display: flex; align-items: center; }
+        .value { font-weight: 600; font-size: 1.25rem; letter-spacing: 0.5px; }
+        .status { font-size: .8rem; margin-top: 2px; transition: color 0.3s; min-height: 1.2em;}
+        
+        .loading { 
+            color: transparent !important;
+            background: rgba(255,255,255,0.1); 
+            border-radius: 4px;
+            animation: skel 1.5s infinite ease-in-out;
+        }
+        @keyframes skel { 0%,100%{opacity:0.6} 50%{opacity:0.3} }
+
+        .controls {
+            display: flex;
+            flex-wrap: wrap; gap: 10px; margin-top: auto;
+            padding-top: 16px; border-top: 1px dashed rgba(255,255,255,0.1);
+            align-items: stretch;
+        }
+        input[type="number"] {
+            width: 100px;
+            padding: 10px; margin: 0; text-align: center;
+        }
+        
+        .btn {
+            padding: 10px 18px;
+            border: none; border-radius: 10px; cursor: pointer;
+            color: #fff; font-weight: 600; font-size: 0.9rem;
+            background: linear-gradient(135deg, var(--accent), var(--accent2));
+            box-shadow: 0 4px 15px rgba(110,142,251,.25);
+            transition: transform 0.1s, box-shadow 0.2s, filter 0.2s;
+            display: flex; align-items: center; justify-content: center; gap: 8px;
+        }
+        .btn:active { transform: scale(0.96); }
+        .btn:disabled { 
+            background: #4a5568;
+            color: #a0aec0; cursor: not-allowed; 
+            box-shadow: none; transform: none;
+        }
+        
+        .btn.secondary { background: #34495e; box-shadow: 0 4px 15px rgba(0,0,0,0.2); }
+        .btn.stop { background: linear-gradient(135deg, #ff6b6b, #ff8e53); box-shadow: 0 4px 15px rgba(255,107,107,.25); }
+        
+        .hint { font-size: .85rem; color: var(--muted); margin-top: 12px; min-height: 1.2em; display:flex; align-items:center; gap:6px;}
+        .mono { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+        #logoutBtn {
+            position: fixed;
+            bottom: 20px; right: 20px; z-index: 1000;
+            padding: 10px 16px; color: #fff;
+            background: rgba(16, 19, 34, 0.6);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 30px; backdrop-filter: blur(8px);
+            opacity: 0; pointer-events: none; transition: opacity 0.4s;
+        }
+        #logoutBtn:hover { background: rgba(16, 19, 34, 0.9); border-color: var(--accent); }
+        body.logged-in #logoutBtn { opacity: 1; pointer-events: auto; }
+
+        #confirmModal {
+            display:none;
+            position:fixed; inset:0; background:rgba(0,0,0,0.85); backdrop-filter:blur(5px);
+            z-index:9999; align-items:center; justify-content:center;
+        }
+
+        .toast {
+            position: fixed;
+            top: 20px; left: 50%; transform: translateX(-50%) translateY(-20px);
+            padding: 12px 24px; border-radius: 30px;
+            font-size: 0.95rem; font-weight: 500; z-index: 9998;
+            opacity: 0;
+            visibility: hidden;
+            transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            background: rgba(16, 19, 34, 0.9); border: 1px solid var(--good); color: var(--good);
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5); display: flex; align-items: center; gap: 10px;
+        }
+        .toast.show { opacity: 1; visibility: visible; transform: translateX(-50%) translateY(0); }
+        .toast.logout { border-color: var(--highlight); color: var(--highlight); }
+        .toast.error { border-color: var(--bad); color: var(--bad); }
+
+        /* Camera Section */
+        #cameraSection {
+            max-width: 960px;
+            margin: 30px auto 0 auto;
+            display: none;
+        }
+        #cameraSection.show { display: block; }
+        .camera-container {
+            background: var(--card);
+            border-radius: 16px;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.5);
+            border: 1px solid rgba(255,255,255,0.08);
+        }
+        .stream {
+            width: 100%;
+            height: auto;
+            min-height: 500px;
+            background: #000;
+            display: block;
+        }
+        .camera-info {
+            padding: 16px;
+            text-align: center;
+            background: rgba(0,0,0,0.3);
+            color: var(--muted);
+            font-size: 0.95rem;
+        }
+
+        #toggleCameraBtn {
+            display: block;
+            margin: 20px auto 0 auto;
+            padding: 12px 28px;
+            font-size: 1rem;
+        }
+
+        #registerLink { color: var(--accent); text-decoration: underline; cursor: pointer; }
+
+        @media (max-width: 900px) {
+            .cards { grid-template-columns: 1fr; }
+            .data-grid { grid-template-columns: 1fr; gap: 20px; }
+            .controls { flex-direction: column; }
+            .btn, input[type="number"] { width: 100%; }
+        }
+    </style>
+
+    <!-- Firebase Compat SDKs (v9 compat for easy use) -->
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-analytics-compat.js"></script>
+</head>
+<body>
+
+    <div id="loginOverlay">
+        <div id="loginBox">
+            <h2>Hamster Monitor</h2>
+            <p style="color:var(--muted); margin-bottom:16px; font-size:0.9rem;">Secure Dashboard Access</p>
+            <input type="email" id="emailInput" placeholder="Email" autocomplete="off" required />
+            <input type="password" id="passInput" placeholder="Password" autocomplete="off" required />
+            
+            <button class="btn" id="loginBtn">Access Dashboard</button>
+            <div id="loginError" style="color:var(--bad); margin-top:10px; min-height:24px; font-size:0.9rem;"></div>
+            
+            <p style="margin-top:16px; font-size:0.9rem; color:var(--muted);">
+                No account? <span id="registerLink">Create one here</span>
+            </p>
+        </div>
+        <button class="btn secondary" id="installAppBtn" style="display:none; margin-bottom:10px;">Install App</button>
+    </div>
+
+    <div id="mainContent">
+        <header>
+            <div class="brand">
+                <div class="dot pulse" id="connectionDot"></div>
+                <div>
+                    <h1>Hamster Monitor</h1>
+                    <div class="meta">
+                        <span>Live IoT Data</span>
+                        <span style="opacity:0.5">•</span>
+                        <span id="lastUpdateText">Connecting...</span>
+                    </div>
+                </div>
+            </div>
+            <div>
+                <button class="btn secondary" id="refreshBtn">
+                    <svg class="icon" viewBox="0 0 24 24"><path d="M23 4v6h-6M1 20v-6h6M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 1 20.49 15"></path></svg>
+                    Refresh
+                </button>
+            </div>
+        </header>
+
+        <div class="cards">
+            <section class="card">
+                <h2>Health & Environment</h2>
+                <div class="data-grid">
+                    <div class="field-group">
+                        <div class="row">
+                            <div class="label"><svg class="icon" viewBox="0 0 24 24"><path d="M14 14.76V3.5a2.5 2.5 0 0 0-5 0v11.26a4.5 4.5 0 1 0 5 0z"></path></svg> Temp</div>
+                            <div class="value" id="tempValue">--</div>
+                        </div>
+                        <div class="status" id="tempStatus">Loading...</div>
+                    </div>
+                    
+                    <div class="field-group">
+                        <div class="row">
+                            <div class="label"><svg class="icon" viewBox="0 0 24 24"><path d="M12 2.69l5.66 5.66a8 8 0 1 1-11.31 0z"></path></svg> Humidity</div>
+                            <div class="value" id="humidValue">--</div>
+                        </div>
+                        <div class="status" id="humidStatus">Loading...</div>
+                    </div>
+                    
+                    <div class="field-group">
+                        <div class="row">
+                            <div class="label"><svg class="icon" viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg> Heart Rate</div>
+                            <div class="value" id="heartValue">--</div>
+                        </div>
+                        <div class="status" id="heartStatus">Loading...</div>
+                    </div>
+                    
+                    <div class="field-group">
+                        <div class="row">
+                            <div class="label"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg> Yesterday's wheel activity (Cycle)</div>
+                            <div class="value mono" id="wheelValue">--</div>
+                        </div>
+                        <div class="status" id="wheelStatus">Loading...</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card">
+                <h2>Feeding Control</h2>
+                
+                <div style="display:flex; justify-content:space-between; margin-bottom:12px;">
+                    <div>
+                        <div class="label">Current Interval</div>
+                        <div class="value mono" id="periodValue" style="font-size:1.5rem; color:var(--accent);">--</div>
+                    </div>
+                    <div style="text-align:right;">
+                        <div class="label" style="justify-content:flex-end;">Last Fed</div>
+                        <div class="value mono" id="lastFedValue" style="font-size:1rem;">--</div>
+                    </div>
+                </div>
+
+                <div style="background:rgba(0,0,0,0.2); padding:12px; border-radius:8px; margin-bottom:12px;">
+                    <div class="row">
+                        <div class="label" style="color:var(--text);">Next Feed Estimate</div>
+                        <div class="value mono" id="nextFeedValue" style="font-size:1rem;">--</div>
+                    </div>
+                    <div class="status" id="feedStatus" style="text-align:right;">Loading...</div>
+                </div>
+
+                <div class="controls">
+                    <div style="display:flex; flex:1; gap:8px;">
+                        <input type="number" step="0.5" min="0" placeholder="Hrs" id="periodInput" />
+                        <button class="btn write-btn" id="confirmPeriodBtn" data-originalText="Set Period">Set Period</button>
+                    </div>
+                    <button class="btn write-btn" id="feedNowBtn" data-originalText="Feed Now">Feed Now</button>
+                    <button class="btn stop write-btn" id="stopFeedBtn" data-originalText="Stop">Stop</button>
+                </div>
+
+                <div class="hint">
+                    <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4M12 8h.01"></path></svg>
+                    <span id="msgText">Ready</span>
+                    <svg style="display:none; width:20px; height:20px; margin-left:8px; fill:none; stroke:var(--good); stroke-width:3; stroke-linecap:round; stroke-linejoin:round;" id="msgIcon" viewBox="0 0 24 24">
+                        <polyline points="20 6 9 17 4 12"></polyline>
+                    </svg>
+                </div>
+            </section>
+        </div>
+
+        <button class="btn" id="toggleCameraBtn">Show Live Camera</button>
+
+        <div id="cameraSection">
+            <div class="camera-container">
+                <img id="stream" class="stream" alt="ESP32-CAM Stream" />
+                <div class="camera-info">Live stream from ESP32-CAM • Refreshing every 30s when visible</div>
+            </div>
+        </div>
+
+        <div id="confirmModal">
+            <div style="background:var(--card); padding:32px; border-radius:16px; text-align:center; max-width:400px; width:90%;">
+                <h3 style="margin:0 0 16px; color:var(--text);">Disable Automatic Feeding?</h3>
+                <p style="color:var(--muted); margin-bottom:24px;">This will set the feeding interval to 0 hours.</p>
+                <div style="display:flex; gap:12px; justify-content:center;">
+                    <button class="btn secondary" id="modalCancel">Cancel</button>
+                    <button class="btn stop" id="modalConfirm">Confirm Stop</button>
+                </div>
+            </div>
+        </div>
+
+        <button id="logoutBtn">Logout</button>
+
+        <div id="toast">
+            <svg class="icon" viewBox="0 0 24 24" style="margin:0">
+                <polyline points="20 6 9 17 4 12"></polyline>
+            </svg>
+            <span id="toastMsg"></span>
+        </div>
+    </div>
+
+    <script>
+        // ====================== FIREBASE INITIALISATION ======================
+        const firebaseConfig = {
+          apiKey: "AIzaSyCshHaonUjLmAydKv7nasT9ZAIS0-6GDfs",
+          authDomain: "project-8196740746387937585.firebaseapp.com",
+          projectId: "project-8196740746387937585",
+          storageBucket: "project-8196740746387937585.firebasestorage.app",
+          messagingSenderId: "793526526974",
+          appId: "1:793526526974:web:0044f40f8c8499498d16af",
+          measurementId: "G-972JHW4TTK"
+        };
+
+        firebase.initializeApp(firebaseConfig);
+        const auth = firebase.auth();
+        
+        // ====================== TOAST FUNCTION ======================
+        function showToast(msg, type = "success") {
+            const t = document.getElementById("toast");
+            const txt = document.getElementById("toastMsg");
+            txt.textContent = msg;
+            t.className = "toast show " + type;
+            setTimeout(() => t.classList.remove("show"), 3000);
+        }
+
+        // ====================== TO AUTH STATE CHANGE ======================
+        auth.onAuthStateChanged(user => {
+            if (user) {
+                document.body.classList.add("logged-in");
+                showToast("Welcome" + (user.displayName ? " " + user.displayName : ""));
+                loadAll();
+                setInterval(loadAll, CONFIG.REFRESH_RATE);
+            } else {
+                document.body.classList.remove("logged-in");
+            }
+        });
+
+        // ====================== LOGIN ======================
+        document.getElementById("loginBtn").addEventListener("click", () => {
+            const email = document.getElementById("emailInput").value.trim();
+            const password = document.getElementById("passInput").value;
+            if (!email || !password) {
+                document.getElementById("loginError").textContent = "Please enter email and password";
+                return;
+            }
+            auth.signInWithEmailAndPassword(email, password)
+                .then(() => document.getElementById("loginError").textContent = "")
+                .catch(err => {
+                    let msg = "Login failed";
+                    if (["auth/user-not-found", "auth/wrong-password"].includes(err.code)) msg = "Invalid email or password";
+                    else if (err.code === "auth/invalid-email") msg = "Invalid email address";
+                    else if (err.code === "auth/too-many-requests") msg = "Too many attempts – try again later";
+                    document.getElementById("loginError").textContent = msg;
+                });
+        });
+
+        // ====================== LOGOUT ======================
+        document.getElementById("logoutBtn").addEventListener("click", () => {
+            auth.signOut().then(() => showToast("Logged out", "logout"));
+        });
+
+        // ====================== REGISTRATION ======================
+        document.addEventListener("DOMContentLoaded", () => {
+            const registerLink = document.getElementById("registerLink");
+            if (registerLink) {
+                registerLink.addEventListener("click", e => {
+                    e.preventDefault();
+                    const email = prompt("Enter your desired email address:");
+                    const password = prompt("Enter a strong password (minimum 6 characters):");
+                    if (email && password) {
+                        if (password.length < 6) {
+                            alert("Password must be at least 6 characters long.");
+                            return;
+                        }
+                        auth.createUserWithEmailAndPassword(email, password)
+                            .then(() => alert("Account created successfully! You can now log in."))
+                            .catch(err => alert("Registration failed: " + err.message));
+                    }
+                });
+            }
+        });
+
+        // ====================== CONFIG & ELEMENTS ======================
+        const CONFIG = {
+            CH1:        3090096,
+            R_KEY1:     "9F1SQQU9GUNQKAM1",
+            W_KEY1:     "IGY0RFW4E11MGLZD",
+
+            CH2:        3128896,
+            R_KEY2:     "SEN0GJI09LXQU1FS",
+            W_KEY2:     "6C84C19UF47J4P1K",
+
+            CH_FEED:    3174561,
+            R_KEY_FEED: "45TC6X1H0R57S2PE",
+            W_KEY_FEED: "2GTZYLC8N1K8ERPV",
+
+            REFRESH_RATE: 15000,
+            WRITE_COOLDOWN: 16
+        };
+
+        const els = {
+            temp: document.getElementById("tempValue"),
+            humid: document.getElementById("humidValue"),
+            heart: document.getElementById("heartValue"),
+            wheel: document.getElementById("wheelValue"),
+            period: document.getElementById("periodValue"),
+            lastFed: document.getElementById("lastFedValue"),
+            nextFeed: document.getElementById("nextFeedValue"),
+            sTemp: document.getElementById("tempStatus"),
+            sHumid: document.getElementById("humidStatus"),
+            sHeart: document.getElementById("heartStatus"),
+            sWheel: document.getElementById("wheelStatus"),
+            sFeed: document.getElementById("feedStatus"),
+            periodIn: document.getElementById("periodInput"),
+            msgText: document.getElementById("msgText"),
+            msgIcon: document.getElementById("msgIcon"),
+            btns: {
+                refresh: document.getElementById("refreshBtn"),
+                set: document.getElementById("confirmPeriodBtn"),
+                stop: document.getElementById("stopFeedBtn"),
+                feed: document.getElementById("feedNowBtn"),
+                cancel: document.getElementById("modalCancel"),
+                confirm: document.getElementById("modalConfirm"),
+                toggleCamera: document.getElementById("toggleCameraBtn")
+            },
+            modal: document.getElementById("confirmModal"),
+            connDot: document.getElementById("connectionDot"),
+            lastUpdate: document.getElementById("lastUpdateText"),
+            cameraSection: document.getElementById("cameraSection")
+        };
+
+        // ====================== CAMERA ======================
+        const ESP_IP = "192.168.128.10:81";
+        const streamUrl = `http://${ESP_IP}/stream`;
+        const streamImg = document.getElementById('stream');
+        let cameraOpen = false;
+
+        function loadStream() {
+            streamImg.src = streamUrl + '?t=' + new Date().getTime();
+        }
+
+        function reloadStream() {
+            streamImg.src = '';
+            setTimeout(loadStream, 600);
+        }
+
+        const streamInterval = setInterval(() => {
+            if (cameraOpen) reloadStream();
+        }, 30000);
+
+        els.btns.toggleCamera.onclick = () => {
+            cameraOpen = !cameraOpen;
+            els.cameraSection.classList.toggle("show", cameraOpen);
+            els.btns.toggleCamera.textContent = cameraOpen ? "Hide Camera" : "Show Live Camera";
+            if (cameraOpen) loadStream();
+            else streamImg.src = '';
+        };
+
+        // ====================== HELPERS ======================
+        function setStatus(el, text) {
+            el.textContent = text || "–";
+            if (!text) return;
+            const l = text.toLowerCase();
+            if (l.includes("too") || l.includes("high") || l.includes("low") || l.includes("hot") || l.includes("cold") || l.includes("humid") || l.includes("dry") || l.includes("not active")) el.style.color = "var(--bad)";
+            else if (l.includes("fine") || l.includes("normal") || l.includes("enabled") || l.includes("active")) el.style.color = "var(--good)";
+            else el.style.color = "var(--highlight)";
+        }
+
+        function toggleLoading(on) {
+            const fields = [els.temp, els.humid, els.heart, els.wheel, els.period, els.lastFed, els.nextFeed];
+            fields.forEach(f => f.classList.toggle("loading", on));
+            els.btns.refresh.disabled = on;
+        }
+
+        function lockControls(sec) {
+            const btns = document.querySelectorAll('.write-btn');
+            btns.forEach(btn => {
+                // Store original text only once
+                if (!btn.dataset.originalText) {
+                    btn.dataset.originalText = btn.textContent.trim();
+                }
+                const original = btn.dataset.originalText || "Action";
+
+                btn.disabled = true;
+                let remain = sec;
+
+                const update = () => {
+                    if (remain > 0) {
+                        btn.textContent = `Wait ${remain}s`;
+                        remain--;
+                        setTimeout(update, 1000);
+                    } else {
+                        btn.textContent = original;
+                        btn.disabled = false;
+                    }
+                };
+                update();
+            });
+        }
+
+        async function readField(ch, field, key) {
+            try {
+                const r = await fetch(`https://api.thingspeak.com/channels/${ch}/fields/${field}/last.txt?api_key=${key}`, {cache:"no-cache"});
+                if (!r.ok) throw 0;
+                return (await r.text()).trim();
+            } catch { return null; }
+        }
+
+        async function writeChannel(key, updates) {
+            const u = new URL("https://api.thingspeak.com/update");
+            u.searchParams.set("api_key", key);
+            updates.forEach(([f,v]) => u.searchParams.set(`field${f}`, v));
+            const r = await fetch(u, {method:"POST"});
+            const body = await r.text();
+            return (r.status === 200 && body !== "0");
+        }
+
+        function formatFullDate(raw) {
+            if (!raw) return "--";
+            return raw.trim();
+        }
+
+        // ====================== DATA LOADING ======================
+        async function loadAll(manual = false) {
+            if (manual) toggleLoading(true);
+            els.lastUpdate.textContent = "Updating...";
+
+            try {
+                const [temp, humid, heart, wheelRaw,
+                       tMsg, hMsg, hrMsg, fMsg, wMsg,
+                       periodRaw, lastFedRaw] = await Promise.all([
+                    readField(CONFIG.CH1, 1, CONFIG.R_KEY1),
+                    readField(CONFIG.CH1, 2, CONFIG.R_KEY1),
+                    readField(CONFIG.CH1, 3, CONFIG.R_KEY1),
+                    readField(CONFIG.CH1, 6, CONFIG.R_KEY1),
+                    readField(CONFIG.CH2, 1, CONFIG.R_KEY2),
+                    readField(CONFIG.CH2, 2, CONFIG.R_KEY2),
+                    readField(CONFIG.CH2, 3, CONFIG.R_KEY2),
+                    readField(CONFIG.CH2, 4, CONFIG.R_KEY2),
+                    readField(CONFIG.CH2, 5, CONFIG.R_KEY2),
+                    readField(CONFIG.CH_FEED, 1, CONFIG.R_KEY_FEED),
+                    readField(CONFIG.CH_FEED, 3, CONFIG.R_KEY_FEED)
+                ]);
+
+                if (temp === null) throw new Error("No connection");
+
+                els.temp.textContent = temp ? `${parseFloat(temp).toFixed(1)}°C` : "--";
+                els.humid.textContent = humid ? `${parseFloat(humid).toFixed(1)}%` : "--";
+                els.heart.textContent = heart || "--";
+                els.wheel.textContent = wheelRaw || "--";
+
+                const period = parseFloat(periodRaw);
+                const validPeriod = isFinite(period) && period >= 0;
+                els.period.textContent = validPeriod ? period + "h" : "--";
+                if (validPeriod) els.periodIn.value = period;
+
+                els.lastFed.textContent = formatFullDate(lastFedRaw);
+
+                if (lastFedRaw && validPeriod && period > 0) {
+                    const last = new Date(lastFedRaw.replace(" ", "T"));
+                    const next = new Date(last.getTime() + period * 3600000);
+                    const y = next.getFullYear();
+                    const m = String(next.getMonth() + 1).padStart(2, "0");
+                    const d = String(next.getDate()).padStart(2, "0");
+                    const h = String(next.getHours()).padStart(2, "0");
+                    const mn = String(next.getMinutes()).padStart(2, "0");
+                    const s = String(next.getSeconds()).padStart(2, "0");
+                    els.nextFeed.textContent = `${y}-${m}-${d} ${h}:${mn}:${s}`;
+                } else if (period === 0) {
+                    els.nextFeed.textContent = "Disabled";
+                } else {
+                    els.nextFeed.textContent = "--";
+                }
+
+                setStatus(els.sTemp, tMsg);
+                setStatus(els.sHumid, hMsg);
+                setStatus(els.sHeart, hrMsg);
+                setStatus(els.sFeed, fMsg);
+                setStatus(els.sWheel, wMsg);
+
+                els.lastUpdate.textContent = "Updated " + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+                els.connDot.classList.add("pulse"); els.connDot.classList.remove("offline");
+                if (manual) showToast("Data refreshed");
+
+            } catch (e) {
+                console.error(e);
+                els.lastUpdate.textContent = "Connection Failed";
+                els.connDot.classList.add("offline"); els.connDot.classList.remove("pulse");
+                if (manual) showToast("Refresh failed", "error");
+            } finally {
+                if (manual) toggleLoading(false);
+            }
+        }
+
+        async function updateFeedStatus(text) {
+            await writeChannel(CONFIG.W_KEY2, [["4", text]]);
+        }
+
+        async function setFeedingPeriod(hours) {
+            if (isNaN(hours) || hours < 0) {
+                els.msgText.textContent = "Invalid value";
+                els.msgText.style.color = "var(--bad)";
+                return;
+            }
+
+            lockControls(CONFIG.WRITE_COOLDOWN);
+
+            const ok = await writeChannel(CONFIG.W_KEY_FEED, [["1", hours]]);
+
+            if (ok) {
+                const statusMsg = hours === 0 
+                    ? "Automatic feeding DISABLED"
+                    : "Automatic feeding ENABLED";
+
+                els.msgText.textContent = hours === 0 ? "Automatic feeding disabled" : "Feeding interval updated";
+                els.msgText.style.color = "var(--good)";
+                els.msgIcon.style.display = "inline-block";
+
+                await updateFeedStatus(statusMsg);
+                setTimeout(loadAll, 2000);
+                setTimeout(() => {
+                    els.msgIcon.style.display = "none";
+                }, 4000);
+            } else {
+                els.msgText.textContent = "Update failed – rate limited";
+                els.msgText.style.color = "var(--bad)";
+            }
+        }
+
+        els.btns.feed.onclick = async () => {
+            els.msgText.textContent = "Dispensing food...";
+            els.msgText.style.color = "var(--highlight)";
+            lockControls(CONFIG.WRITE_COOLDOWN);
+
+            const now = new Date();
+            const ts = now.getFullYear() + "-" +
+                       String(now.getMonth()+1).padStart(2,"0") + "-" +
+                       String(now.getDate()).padStart(2,"0") + " " +
+                       String(now.getHours()).padStart(2,"0") + ":" +
+                       String(now.getMinutes()).padStart(2,"0") + ":" +
+                       String(now.getSeconds()).padStart(2,"0");
+
+            const ok = await writeChannel(CONFIG.W_KEY_FEED, [
+                ["2", "1"],
+                ["3", ts]
+            ]);
+
+            if (ok) {
+                els.msgText.textContent = "Yum! Feeding now.";
+                els.msgText.style.color = "var(--good)";
+
+                await updateFeedStatus("Feeding hamster now...");
+
+                setTimeout(async () => {
+                    await writeChannel(CONFIG.W_KEY_FEED, [["2", "0"]]);
+                }, 4000);
+
+                setTimeout(async () => {
+                    const currentPeriod = parseFloat(els.period.textContent.replace("h", "")) || 0;
+                    const statusMsg = currentPeriod > 0 ? "Automatic feeding ENABLED" : "Automatic feeding DISABLED";
+                    await updateFeedStatus(statusMsg);
+                    loadAll();
+                }, 10000);
+
+                setTimeout(loadAll, 2000);
+            } else {
+                els.msgText.textContent = "Rate limit – try later";
+                els.msgText.style.color = "var(--bad)";
+            }
+        };
+
+        els.btns.set.onclick = () => {
+            const v = parseFloat(els.periodIn.value);
+            if (isNaN(v) || v < 0) { 
+                els.msgText.textContent = "Invalid value"; 
+                els.msgText.style.color = "var(--bad)"; 
+                return; 
+            }
+            setFeedingPeriod(v);
+        };
+
+        els.btns.stop.onclick = () => els.modal.style.display = "flex";
+        els.btns.cancel.onclick = () => els.modal.style.display = "none";
+        els.btns.confirm.onclick = () => { els.modal.style.display = "none"; setFeedingPeriod(0); };
+
+        els.btns.refresh.onclick = () => loadAll(true);
+        
+        // ====================== PWA INSTALL LOGIC ======================
+        let deferredPrompt;
+        const installBtn = document.getElementById('installAppBtn');
+        
+        window.addEventListener('beforeinstallprompt', (e) => {
+          e.preventDefault();          
+          deferredPrompt = e;          
+          installBtn.style.display = 'block';
+        });
+        
+        installBtn.addEventListener('click', (e) => {
+          installBtn.style.display = 'none';
+          deferredPrompt.prompt();
+          deferredPrompt.userChoice.then((choiceResult) => {
+            if (choiceResult.outcome === 'accepted') {
+              console.log('User accepted the A2HS prompt');
+            } else {
+              console.log('User dismissed the A2HS prompt');
+            }
+            deferredPrompt = null;
+          });
+        });
+    </script>
+</body>
+</html>
